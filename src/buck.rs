@@ -980,6 +980,7 @@ pub struct CxxLibrary {
     pub header_namespace: Option<String>,
     pub include_directories: Vec<SubtargetOrPath>,
     pub deps: BTreeSet<RuleRef>,
+    pub exported_linker_flags: Vec<String>,
     pub preferred_linkage: Option<String>,
     pub undefined_symbols: bool,
 }
@@ -1005,6 +1006,7 @@ impl Serialize for CxxLibrary {
             header_namespace,
             include_directories,
             deps,
+            exported_linker_flags,
             preferred_linkage,
             undefined_symbols,
         } = self;
@@ -1057,6 +1059,9 @@ impl Serialize for CxxLibrary {
         }
         if *undefined_symbols {
             map.serialize_entry("undefined_symbols", undefined_symbols)?;
+        }
+        if !exported_linker_flags.is_empty() {
+            map.serialize_entry("exported_linker_flags", exported_linker_flags)?;
         }
         map.serialize_entry("visibility", visibility)?;
         if !deps.is_empty() {
