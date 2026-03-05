@@ -201,6 +201,15 @@ pub struct BuckConfig {
     /// Rule name for a build script invocation
     #[serde(default)]
     pub buildscript_genrule: StringWithDefault<MustBe!("buildscript_run")>,
+
+    /// Glob patterns for discovering header files from `fixup_include_paths`
+    /// directories. Default: `["**/*.asm", "**/*.h"]`
+    #[serde(default = "default_fixup_include_globs")]
+    pub fixup_include_globs: Vec<String>,
+}
+
+fn default_fixup_include_globs() -> Vec<String> {
+    vec!["**/*.asm".to_owned(), "**/*.h".to_owned()]
 }
 
 #[derive(Debug, Clone, Deserialize)]
