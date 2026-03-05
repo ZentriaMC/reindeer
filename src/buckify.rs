@@ -304,9 +304,10 @@ fn generate_rules<'scope, 'env>(
         };
 
         match generate_target_rules(context, pkg, tgt, will_use_rules) {
-            Ok((rules, _)) if rules.is_empty() => {
+            Ok((rules, deps)) if rules.is_empty() && deps.is_empty() => {
                 // Don't generate rules for dependencies if we're not emitting
-                // any rules for this target.
+                // any rules for this target and there are no dependencies to
+                // process.
             }
             Ok((rules, mut deps)) => {
                 if will_use_rules {
@@ -1097,6 +1098,14 @@ fn generate_target_rules<'a>(
         }));
     }
 
+    // Save metadata for potential cxx_library emission (before it gets moved
+    // into the library rule below).
+    let cxx_library_metadata = if fixups.has_cxx_library_fixups() {
+        Some(metadata.clone())
+    } else {
+        None
+    };
+
     // Generate rules appropriate to each kind of crate we want to support
     let mut rules: Vec<Rule> = if (tgt.kind_lib() && tgt.crate_lib())
         || (tgt.kind_proc_macro() && tgt.crate_proc_macro())
@@ -1281,6 +1290,20 @@ fn generate_target_rules<'a>(
 
         // Library depends on the build script (if there is one).
         dep_pkgs.push((pkg, TargetReq::BuildScript));
+
+        // Emit cxx_library rules for crates that have [[cxx_library]] fixups
+        // but no build script. Crates with build scripts get their cxx_library
+        // rules emitted via emit_buildscript_rules() instead.
+        if let Some(ref cxx_meta) = cxx_library_metadata {
+            if !pkg.targets.iter().any(|t| t.kind_custom_build()) {
+                rules.extend(fixups.emit_cxx_library_rules(
+                    cxx_meta,
+                    index,
+                    &compatible_platforms,
+                    collision_info,
+                )?);
+            }
+        }
 
         rules
     } else if tgt.kind_bin() && tgt.crate_bin() {

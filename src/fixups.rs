@@ -448,16 +448,14 @@ impl<'meta> Fixups<'meta> {
         }))
     }
 
-    /// Return buildscript-related rules
-    /// The rules may be platform specific, but they're emitted unconditionally. (The
-    /// dependencies referencing them are conditional).
-    pub fn emit_buildscript_rules(
+    /// Emit cxx_library and prebuilt_cxx_library rules from fixups.
+    ///
+    /// This is separated from `emit_buildscript_rules` so that crates without
+    /// build scripts can still define `[[cxx_library]]` fixups.
+    pub fn emit_cxx_library_rules(
         &self,
-        mut buildscript_build: RustBinary,
-        config: &'meta Config,
-        manifest_dir: Option<SubtargetOrPath>,
+        metadata: &BTreeMap<String, Box<dyn crate::buck::Metadata>>,
         index: &Index,
-        target: &ManifestTarget,
         compatible_platforms: &BTreeSet<&PlatformName>,
         collision_info: &CollisionInfo,
     ) -> anyhow::Result<Vec<Rule>> {
@@ -465,45 +463,11 @@ impl<'meta> Fixups<'meta> {
 
         let rel_fixup = relative_path(self.third_party_dir, &self.fixup_config.fixup_dir);
 
-        let buildscript_rule_name = match self.buildscript_rule_name(collision_info) {
-            None => {
-                log::warn!(
-                    "Package {} doesn't have a build script to fix up",
-                    self.package
-                );
-                return Ok(res);
-            }
-            Some(name) => name,
-        };
-
-        for platform_name in compatible_platforms {
-            let mut has_explicit_buildscript_fixup = false;
-            for fixup in self.configs(platform_name) {
-                if fixup.buildscript.span.is_some() {
-                    has_explicit_buildscript_fixup = true;
-                    fixup.buildscript.used.store(true, Ordering::Relaxed);
-                }
-            }
-            if !has_explicit_buildscript_fixup {
-                let unresolved_package_msg = format!(
-                    "{} v{} has a build script, but {} does not say what to do with it. Add `buildscript.run = false` or `buildscript.run = true`",
-                    self.package.name,
-                    self.package.version,
-                    Path::new("fixups")
-                        .join(&self.package.name)
-                        .join("fixups.toml")
-                        .display(),
-                );
-                if config.unresolved_fixup_error {
-                    log::error!("{}", unresolved_package_msg);
-                    bail!("Unresolved fixup errors, fix them and rerun buckify.");
-                } else {
-                    log::warn!("{}", unresolved_package_msg);
-                    break;
-                }
-            }
-        }
-
+        // No build script is required to get here: a crate can carry vendored C/C++ and a
+        // [[cxx_library]] fixup without a build.rs at all (zeromq-src is the case this exists
+        // for). The buildscript gating that used to stand here -- the early return when there is
+        // no build script rule, and the "does not say what to do with it" check -- belongs to
+        // emit_buildscript_rules, which is the half that actually needs one.
         let configs_grouped_by_platform = self.configs_grouped_by_platform(compatible_platforms);
         let mut cxx_libraries = Vec::new();
         let mut prebuilt_cxx_libraries = Vec::new();
@@ -513,13 +477,6 @@ impl<'meta> Fixups<'meta> {
             }
             for library in &fixup.prebuilt_cxx_library {
                 prebuilt_cxx_libraries.push((library, platforms));
-            }
-        }
-
-        let mut buildscript_platforms = BTreeSet::new();
-        for &platform_name in compatible_platforms {
-            if self.has_buildscript_for_platform(platform_name) {
-                buildscript_platforms.insert(platform_name);
             }
         }
 
@@ -568,7 +525,7 @@ impl<'meta> Fixups<'meta> {
                             ),
                         ]),
                         licenses: Default::default(),
-                        metadata: buildscript_build.common.common.metadata.clone(),
+                        metadata: metadata.clone(),
                         compatible_with: compatible_with.clone(),
                         target_compatible_with: Select {
                             common: target_compatible_with.clone(),
@@ -665,7 +622,7 @@ impl<'meta> Fixups<'meta> {
                         name: target_name.clone(),
                         visibility: Visibility::Private,
                         licenses: Default::default(),
-                        metadata: buildscript_build.common.common.metadata.clone(),
+                        metadata: metadata.clone(),
                         compatible_with: compatible_with.clone(),
                         target_compatible_with: Select {
                             common: target_compatible_with.clone(),
@@ -755,7 +712,7 @@ impl<'meta> Fixups<'meta> {
                     },
                     name: Name(format!("{}-{}", index.public_rule_name(self.package), name)),
                     actual: cxx_library_target,
-                    platforms: (!config.buck.alias_with_platforms.is_default)
+                    platforms: (!self.config.buck.alias_with_platforms.is_default)
                         .then(|| cxx_library_platforms.iter().map(|&p| p.clone()).collect()),
                     target_compatible_with: Select {
                         common: target_compatible_with.clone(),
@@ -806,7 +763,7 @@ impl<'meta> Fixups<'meta> {
                                 ),
                             ]),
                             licenses: Default::default(),
-                            metadata: buildscript_build.common.common.metadata.clone(),
+                            metadata: metadata.clone(),
                             compatible_with: compatible_with.clone(),
                             target_compatible_with: Select {
                                 common: target_compatible_with.clone(),
@@ -852,7 +809,7 @@ impl<'meta> Fixups<'meta> {
                             name: target_name.clone(),
                             visibility: Visibility::Private,
                             licenses: Default::default(),
-                            metadata: buildscript_build.common.common.metadata.clone(),
+                            metadata: metadata.clone(),
                             compatible_with: compatible_with.clone(),
                             target_compatible_with: Select {
                                 common: target_compatible_with.clone(),
@@ -886,7 +843,7 @@ impl<'meta> Fixups<'meta> {
                             static_lib_file_name,
                         )),
                         actual: prebuilt_cxx_library_target,
-                        platforms: (!config.buck.alias_with_platforms.is_default).then(|| {
+                        platforms: (!self.config.buck.alias_with_platforms.is_default).then(|| {
                             prebuilt_cxx_library_platforms
                                 .iter()
                                 .map(|&p| p.clone())
@@ -903,6 +860,87 @@ impl<'meta> Fixups<'meta> {
                         )),
                     }));
                 }
+            }
+        }
+
+        Ok(res)
+    }
+
+    /// Check if this crate has any `[[cxx_library]]` or `[[prebuilt_cxx_library]]` fixups.
+    pub fn has_cxx_library_fixups(&self) -> bool {
+        let base = &self.fixup_config.base;
+        if !base.cxx_library.is_empty() || !base.prebuilt_cxx_library.is_empty() {
+            return true;
+        }
+        self.fixup_config.platform_fixup.iter().any(|fixup| {
+            !fixup.cxx_library.is_empty() || !fixup.prebuilt_cxx_library.is_empty()
+        })
+    }
+
+    /// Return buildscript-related rules
+    /// The rules may be platform specific, but they're emitted unconditionally. (The
+    /// dependencies referencing them are conditional).
+    pub fn emit_buildscript_rules(
+        &self,
+        mut buildscript_build: RustBinary,
+        config: &'meta Config,
+        manifest_dir: Option<SubtargetOrPath>,
+        index: &Index,
+        target: &ManifestTarget,
+        compatible_platforms: &BTreeSet<&PlatformName>,
+        collision_info: &CollisionInfo,
+    ) -> anyhow::Result<Vec<Rule>> {
+        let buildscript_rule_name = match self.buildscript_rule_name(collision_info) {
+            None => {
+                log::warn!(
+                    "Package {} doesn't have a build script to fix up",
+                    self.package
+                );
+                return Ok(vec![]);
+            }
+            Some(name) => name,
+        };
+
+        for platform_name in compatible_platforms {
+            let mut has_explicit_buildscript_fixup = false;
+            for fixup in self.configs(platform_name) {
+                if fixup.buildscript.span.is_some() {
+                    has_explicit_buildscript_fixup = true;
+                    fixup.buildscript.used.store(true, Ordering::Relaxed);
+                }
+            }
+            if !has_explicit_buildscript_fixup {
+                let unresolved_package_msg = format!(
+                    "{} v{} has a build script, but {} does not say what to do with it. Add `buildscript.run = false` or `buildscript.run = true`",
+                    self.package.name,
+                    self.package.version,
+                    Path::new("fixups")
+                        .join(&self.package.name)
+                        .join("fixups.toml")
+                        .display(),
+                );
+                if config.unresolved_fixup_error {
+                    log::error!("{}", unresolved_package_msg);
+                    bail!("Unresolved fixup errors, fix them and rerun buckify.");
+                } else {
+                    log::warn!("{}", unresolved_package_msg);
+                    break;
+                }
+            }
+        }
+
+        // Emit cxx_library and prebuilt_cxx_library rules
+        let mut res = self.emit_cxx_library_rules(
+            &buildscript_build.common.common.metadata,
+            index,
+            compatible_platforms,
+            collision_info,
+        )?;
+
+        let mut buildscript_platforms = BTreeSet::new();
+        for &platform_name in compatible_platforms {
+            if self.has_buildscript_for_platform(platform_name) {
+                buildscript_platforms.insert(platform_name);
             }
         }
 
