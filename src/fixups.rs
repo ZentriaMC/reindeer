@@ -497,6 +497,7 @@ impl<'meta> Fixups<'meta> {
                 deps,
                 compatible_with,
                 target_compatible_with,
+                exported_linker_flags,
                 preferred_linkage,
                 undefined_symbols,
                 ..
@@ -591,6 +592,7 @@ impl<'meta> Fixups<'meta> {
                     preprocessor_flags: preprocessor_flags.clone(),
                     header_namespace: header_namespace.clone(),
                     deps: deps.iter().cloned().map(RuleRef::new).collect(),
+                    exported_linker_flags: exported_linker_flags.clone(),
                     preferred_linkage: preferred_linkage.clone(),
                     undefined_symbols: *undefined_symbols,
                     platforms: self
@@ -693,6 +695,7 @@ impl<'meta> Fixups<'meta> {
                     preprocessor_flags: preprocessor_flags.clone(),
                     header_namespace: header_namespace.clone(),
                     deps: deps.iter().cloned().map(RuleRef::new).collect(),
+                    exported_linker_flags: exported_linker_flags.clone(),
                     preferred_linkage: preferred_linkage.clone(),
                     undefined_symbols: *undefined_symbols,
                     platforms: self

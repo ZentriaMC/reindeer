@@ -110,6 +110,9 @@ pub struct CxxLibraryFixup {
     pub compatible_with: Vec<RuleRef>,
     #[serde(default)]
     pub target_compatible_with: Vec<RuleRef>,
+    /// Extra flags exported to the linker for dependents
+    #[serde(default)]
+    pub exported_linker_flags: Vec<String>,
     /// Cxx library preferred linkage (how dependents should link you)
     pub preferred_linkage: Option<String>,
     /// Whether to allow undefined symbols during compilation (e.g. when a rust library
