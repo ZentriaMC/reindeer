@@ -645,7 +645,7 @@ impl<'meta> Fixups<'meta> {
                         }
 
                         let globs = Globs::new(
-                            GlobSetKind::from_iter(["**/*.asm", "**/*.h"]).unwrap(),
+                            GlobSetKind::from_iter(&self.config.buck.fixup_include_globs).unwrap(),
                             NO_EXCLUDE,
                         );
                         for fixup_include_path in fixup_include_paths {
