@@ -1176,10 +1176,11 @@ impl<'meta> Fixups<'meta> {
                 &mut buildscript_run.platform,
                 &buildscript_platforms,
                 |platform_name| {
-                    // Dependencies first, so an explicit `env` in this crate's own fixups still
-                    // wins -- the generated value is a default, not an override.
-                    let mut buildscript_run_env =
-                        self.dep_links_env(index, platform_name, collision_info)?;
+                    // Least specific first, so a crate's own `env` still wins: the repo-wide
+                    // defaults, then what its `links` dependencies publish, then its own fixups.
+                    let mut buildscript_run_env = self.config.buck.buildscript_env.clone();
+                    buildscript_run_env
+                        .extend(self.dep_links_env(index, platform_name, collision_info)?);
                     for fixup in self.configs(platform_name) {
                         if let Some(fixup_buildscript_run) = &fixup.buildscript.run {
                             buildscript_run_env.extend(

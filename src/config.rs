@@ -7,6 +7,7 @@
 
 //! Global third-party config
 
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::hash_map;
 use std::env;
@@ -160,6 +161,17 @@ pub struct BuckConfig {
     /// Split mode, with each crate getting a separate generated BUCK file.
     #[serde(default)]
     pub split: bool,
+
+    /// Environment added to every generated `buildscript_run`.
+    ///
+    /// For the variables cargo sets for build scripts that buck2's prelude does
+    /// not. `OPT_LEVEL` is the one that bites: cc-rs reads it and hard-errors
+    /// with "environment variable OPT_LEVEL not defined" rather than assuming a
+    /// default, so every crate that compiles C fails at once, and the message
+    /// names the crate rather than the missing variable. A crate's own
+    /// `[buildscript.run] env` still overrides what is set here.
+    #[serde(default)]
+    pub buildscript_env: BTreeMap<String, String>,
 
     /// Populate the `platform` attribute of `rust_library` and `rust_binary`
     /// targets with all platforms the crate is configured for, even when some
