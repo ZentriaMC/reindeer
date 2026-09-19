@@ -413,6 +413,96 @@ impl<'meta> Fixups<'meta> {
             .find(|tgt| tgt.kind_custom_build())
     }
 
+    /// The environment cargo would hand this crate's build script on account of its `links`
+    /// dependencies.
+    ///
+    /// Cargo gives a build script `DEP_<LINKS>_<KEY>` for every direct dependency that declares a
+    /// `links` key, carrying whatever that dependency's build script printed as
+    /// `cargo::metadata=KEY=VALUE`. Neither buck2's prelude nor reindeer reproduces this, so a
+    /// crate like librocksdb-sys compiles against none of the headers its four `-sys` siblings
+    /// publish and stops at `#include <zlib.h>`.
+    ///
+    /// Cargo reads those values out of the build script's stdout as it runs; buck2 needs the
+    /// environment fixed at analysis time, so they come from what the producing crate declares in
+    /// its own `[buildscript.run] links_metadata` instead. Only the target name is computed here,
+    /// which is the point: it is derived from the same collision_info that names the rule, so it
+    /// cannot fall out of step with it the way a hand-written label does.
+    fn dep_links_env(
+        &self,
+        index: &Index,
+        platform_name: &PlatformName,
+        collision_info: &CollisionInfo,
+    ) -> anyhow::Result<BTreeMap<String, String>> {
+        let mut env = BTreeMap::new();
+
+        // In split mode every crate gets its own buck package, and the label below would have to
+        // name it. Not handled yet; emitting a same-package label here would simply be wrong.
+        if self.config.buck.split {
+            return Ok(env);
+        }
+
+        // Cargo derives these from the package's dependencies, not the build script's, so the lib
+        // target is what to ask about -- librocksdb-sys depends on libz-sys normally, and would be
+        // missed by looking at build-dependencies alone.
+        let Some(lib_target) = self.package.targets.iter().find(|t| t.kind_lib()) else {
+            return Ok(env);
+        };
+
+        let fixups_dir = self.config.resolved_fixups_dir(&self.paths.third_party_dir);
+
+        for dep in index.resolved_deps_for_target(self.package, lib_target, platform_name) {
+            let Some(links) = &dep.package.links else {
+                continue;
+            };
+            let Some(buildscript_target) =
+                dep.package.targets.iter().find(|t| t.kind_custom_build())
+            else {
+                continue;
+            };
+
+            let dep_fixups = FixupConfigFile::load(fixups_dir.join(&dep.package.name))?;
+            let Some(buildscript_run) = &dep_fixups.base.buildscript.run else {
+                continue;
+            };
+            if buildscript_run.links_metadata.is_empty() {
+                continue;
+            }
+
+            // Same shape as buildscript_genrule_name, for a package that is not self.
+            let mut genrule = format!(
+                "{}-{}",
+                collision_info.target_display(dep.package),
+                buildscript_target.name,
+            );
+            if genrule.ends_with("-build-script-build") {
+                genrule.truncate(genrule.len() - 6);
+            }
+            genrule.push_str("-run");
+
+            for (key, subpath) in &buildscript_run.links_metadata {
+                let out_dir = format!(
+                    "$(location //{}:{}[out_dir])",
+                    self.paths.buck_package, genrule,
+                );
+                let value = if subpath.is_empty() {
+                    out_dir
+                } else {
+                    format!("{}/{}", out_dir, subpath)
+                };
+                env.insert(
+                    format!(
+                        "DEP_{}_{}",
+                        links.to_uppercase().replace('-', "_"),
+                        key.to_uppercase().replace('-', "_"),
+                    ),
+                    value,
+                );
+            }
+        }
+
+        Ok(env)
+    }
+
     pub fn buildscript_genrule_name(&self, collision_info: &CollisionInfo) -> Name {
         let mut name = self
             .buildscript_rule_name(collision_info)
@@ -1086,10 +1176,18 @@ impl<'meta> Fixups<'meta> {
                 &mut buildscript_run.platform,
                 &buildscript_platforms,
                 |platform_name| {
-                    let mut buildscript_run_env = BTreeMap::new();
+                    // Dependencies first, so an explicit `env` in this crate's own fixups still
+                    // wins -- the generated value is a default, not an override.
+                    let mut buildscript_run_env =
+                        self.dep_links_env(index, platform_name, collision_info)?;
                     for fixup in self.configs(platform_name) {
                         if let Some(fixup_buildscript_run) = &fixup.buildscript.run {
-                            buildscript_run_env.extend(&fixup_buildscript_run.env);
+                            buildscript_run_env.extend(
+                                fixup_buildscript_run
+                                    .env
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v.clone())),
+                            );
                         }
                     }
                     Ok(buildscript_run_env)

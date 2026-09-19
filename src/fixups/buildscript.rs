@@ -70,6 +70,24 @@ pub struct BuildscriptRun {
     pub rustc_link_lib: Option<bool>,
     /// Whether to translate cargo::rustc-link-search into `-L` flags for rustc.
     pub rustc_link_search: Option<bool>,
+    /// What this crate's build script publishes via `cargo::metadata=KEY=VALUE`.
+    ///
+    /// Only meaningful on a crate with a `links` key. Cargo hands these to the
+    /// build script of every crate that directly depends on this one, as
+    /// `DEP_<LINKS>_<KEY>` uppercased -- so `links = "z"` plus a key of
+    /// `include` arrives as `DEP_Z_INCLUDE`. Neither buck2's prelude nor
+    /// reindeer reproduces that, so without this the dependent's build script
+    /// looks for the variable and finds nothing.
+    ///
+    /// Cargo learns the values by reading the build script's stdout as it runs.
+    /// buck2 needs the environment fixed at analysis time, so the values cannot
+    /// be discovered the same way and are declared here instead: each is a path
+    /// relative to this build script's `OUT_DIR`, with an empty string meaning
+    /// `OUT_DIR` itself. Declaring them on the crate that owns `links` -- rather
+    /// than on each dependent -- is what keeps the generated target name out of
+    /// hand-written config, so a version bump cannot silently unhook it.
+    #[serde(default)]
+    pub links_metadata: BTreeMap<String, String>,
 }
 
 fn set_true() -> bool {
