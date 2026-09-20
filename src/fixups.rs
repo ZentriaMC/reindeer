@@ -303,10 +303,35 @@ impl<'meta> Fixups<'meta> {
         })
     }
 
+    /// Where an overlay provides this file, the path to it.
+    ///
+    /// An overlay "logically adds to or replaces files in manifest dir", so a file it
+    /// carries has to win everywhere that file is referenced -- not only in the rust
+    /// target's mapped_srcs. A [[cxx_library]] naming the same path would otherwise
+    /// compile the archive's original while the crate compiled the overlaid one, which
+    /// for a patched C library means it builds and then links against the wrong API.
+    fn overlay_path(&self, relative_to_manifest_dir: &Path) -> Option<PathBuf> {
+        for config in self.platform_independent_configs() {
+            let Some(overlay) = config.overlay.as_ref() else {
+                continue;
+            };
+            let overlay_dir = self.fixup_config.fixup_dir.join(overlay);
+            if overlay_dir.join(relative_to_manifest_dir).is_file() {
+                return Some(
+                    relative_path(self.output_dir(), &overlay_dir).join(relative_to_manifest_dir),
+                );
+            }
+        }
+        None
+    }
+
     fn subtarget_or_path(
         &self,
         relative_to_manifest_dir: &Path,
     ) -> anyhow::Result<SubtargetOrPath> {
+        if let Some(overlaid) = self.overlay_path(relative_to_manifest_dir) {
+            return Ok(SubtargetOrPath::Path(BuckPath(overlaid)));
+        }
         if matches!(self.config.vendor, VendorConfig::Source(_))
             || matches!(self.package.source, Source::Local)
         {
