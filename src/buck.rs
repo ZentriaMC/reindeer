@@ -1087,9 +1087,12 @@ impl Serialize for CxxLibrary {
         if !metadata.is_empty() {
             map.serialize_entry("metadata", metadata)?;
         }
-        if let Some(platforms) = platforms {
-            serialize_platforms_set_as_dict(&mut map, platforms)?;
-        }
+        // Not serialized: cxx_library has no `platform` attribute, so emitting one is
+        // rejected outright -- "Found `platform` extra named parameter(s) for call to
+        // cxx_library". It only ever appears here because
+        // platform_compatibility_on_all_targets marks every target with the platforms it
+        // is configured for, and for this rule that marking has nowhere to go.
+        let _ = platforms;
         if let Some(preferred_linkage) = preferred_linkage {
             map.serialize_entry("preferred_linkage", preferred_linkage)?;
         }
