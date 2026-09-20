@@ -1266,6 +1266,30 @@ pub enum Rule {
     RootPackage(RustLibrary),
 }
 
+impl Rule {
+    /// The package a rule was generated for, where there is one.
+    ///
+    /// Alias, archive and fetch rules describe how to obtain a crate rather than how to
+    /// build one, and are not owned by a package in this sense.
+    pub fn owner(&self) -> Option<&PackageVersion> {
+        match self {
+            Rule::Binary(RustBinary { owner, .. })
+            | Rule::Library(RustLibrary { owner, .. })
+            | Rule::BuildscriptBinary(RustBinary { owner, .. })
+            | Rule::RootPackage(RustLibrary { owner, .. }) => Some(owner),
+            Rule::BuildscriptGenrule(BuildscriptGenrule { owner, .. }) => Some(owner),
+            Rule::Sources(Sources { owner, .. }) | Rule::Filegroup(Filegroup { owner, .. }) => {
+                Some(owner)
+            }
+            Rule::CxxLibrary(CxxLibrary { owner, .. })
+            | Rule::PrebuiltCxxLibrary(PrebuiltCxxLibrary { owner, .. }) => Some(owner),
+            Rule::Alias(_) | Rule::ExtractArchive(_) | Rule::HttpArchive(_) | Rule::GitFetch(_) => {
+                None
+            }
+        }
+    }
+}
+
 impl Eq for Rule {}
 
 impl PartialEq for Rule {

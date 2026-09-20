@@ -85,6 +85,23 @@ pub struct Config {
     #[serde(default)]
     pub include_top_level: bool,
 
+    /// Write each workspace member's rules to a BUCK beside its own Cargo.toml,
+    /// instead of into the single generated file under `third_party_dir`.
+    ///
+    /// `include_workspace_members` on its own only works when the members sit
+    /// underneath `third_party_dir`, because a generated BUCK cannot name
+    /// sources above itself -- reindeer refuses with "crate sources would be
+    /// inaccessible from the generated BUCK file". That is the wrong shape for
+    /// a monorepo, where first-party crates live in their own tree and the
+    /// third-party file is off to one side.
+    ///
+    /// With this on, a member's sources are resolved relative to its own
+    /// directory and its rules are written there, so `//rust/ballast:ballast`
+    /// is an ordinary target whose `srcs` are its own files. Dependencies on
+    /// third-party crates are unaffected: those labels were already absolute.
+    #[serde(default)]
+    pub workspace_member_buck: bool,
+
     /// Include workspace members in the generated BUCK file.
     ///
     /// Generally workspace members are located outside the third party directory.

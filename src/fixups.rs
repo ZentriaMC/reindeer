@@ -167,6 +167,22 @@ pub(crate) fn resolver_fixups_for_package(
 }
 
 impl<'meta> Fixups<'meta> {
+    /// Directory the generated BUCK for this package will live in.
+    ///
+    /// Normally `third_party_dir`, which every generated path is relative to. Under
+    /// `workspace_member_buck` a member's rules are written beside its own Cargo.toml
+    /// instead, so its paths are relative to that -- a member is recognised by sitting
+    /// outside `third_party_dir`, which is the same condition that would otherwise make
+    /// its sources unreachable from the generated file.
+    fn output_dir(&self) -> &'meta Path {
+        if self.config.workspace_member_buck && !self.manifest_dir.starts_with(self.third_party_dir)
+        {
+            self.manifest_dir
+        } else {
+            self.third_party_dir
+        }
+    }
+
     fn configs(&self, platform_name: &PlatformName) -> Vec<&FixupConfig> {
         let mut configs = Vec::with_capacity(1 + self.fixup_config.platform_fixup.len());
 
@@ -1687,7 +1703,7 @@ impl<'meta> Fixups<'meta> {
             matches!(self.config.vendor, VendorConfig::Source(_))
                 || matches!(self.package.source, Source::Local)
         );
-        let manifest_rel = relative_path(self.third_party_dir, self.manifest_dir);
+        let manifest_rel = relative_path(self.output_dir(), self.manifest_dir);
 
         let mut ret = BTreeSet::new();
         for path in naive_srcs {

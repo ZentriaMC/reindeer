@@ -714,16 +714,29 @@ fn generate_target_rules<'a>(
     let mapped_manifest_dir;
     let mut crate_root;
     if matches!(config.vendor, VendorConfig::Source(_)) || matches!(pkg.source, Source::Local) {
-        let relative_manifest_dir = match manifest_dir
+        // A workspace member written to its own directory names its sources relative to
+        // itself, so there is nothing to strip and nothing to reach up past. Without this
+        // the strip below fails for any member outside third_party_dir, which is every
+        // member in a tree that keeps its own code separate from its vendored crates.
+        let own_buck = config.workspace_member_buck
+            && index
+                .workspace_members
+                .iter()
+                .any(|member| member.manifest_dir() == manifest_dir);
+        let relative_manifest_dir = if own_buck {
+            Path::new("")
+        } else {
+            match manifest_dir
             .strip_prefix(&paths.third_party_dir)
 			.with_context(|| format!(
                 "crate sources would be inaccessible from the generated BUCK file, cannot refer to {} from {}.",
                 relative_path(&paths.third_party_dir, manifest_dir).display(),
                 paths.third_party_dir.join(&config.buck.file_name).display(),
             ))
-        {
-            Err(_) if !will_use_rules => Path::new("__unused__"),
-            res => res?,
+            {
+                Err(_) if !will_use_rules => Path::new("__unused__"),
+                res => res?,
+            }
         };
         if !matches!(config.vendor, VendorConfig::Source(_)) || matches!(pkg.source, Source::Local)
         {
@@ -1906,6 +1919,44 @@ pub(crate) fn buckify(
             }
 
             cleanup_stale_split_vendor_buck_files(config, paths, &generated_vendor_buck_paths)?;
+        } else if config.workspace_member_buck {
+            // Each workspace member owns a BUCK beside its own Cargo.toml; everything else
+            // stays in the one generated file. Partitioned by the owner every rule already
+            // carries, so a member's library, binaries and build script travel together.
+            let member_dir: BTreeMap<&str, &Path> = context
+                .index
+                .workspace_members
+                .iter()
+                .map(|member| (member.name.as_str(), member.manifest_dir()))
+                .collect();
+
+            let mut third_party = Vec::new();
+            let mut per_member: BTreeMap<&Path, Vec<&Rule>> = BTreeMap::new();
+            for rule in &rules {
+                match rule.owner().and_then(|owner| member_dir.get(owner.name.as_str())) {
+                    Some(dir) => per_member.entry(dir).or_default().push(rule),
+                    None => third_party.push(rule),
+                }
+            }
+
+            let mut out = Vec::new();
+            buck::write_buckfile(&config.buck, third_party.into_iter(), &mut out)
+                .context("writing buck file")?;
+            if !fs::read(buckpath).is_ok_and(|x| x == out) {
+                fs::write(buckpath, out)
+                    .with_context(|| format!("write {} file", buckpath.display()))?;
+            }
+
+            for (dir, member_rules) in per_member {
+                let path = dir.join(&config.buck.file_name);
+                let mut out = Vec::new();
+                buck::write_buckfile(&config.buck, member_rules.into_iter(), &mut out)
+                    .context("writing buck file")?;
+                if !fs::read(&path).is_ok_and(|x| x == out) {
+                    fs::write(&path, out)
+                        .with_context(|| format!("write {} file", path.display()))?;
+                }
+            }
         } else {
             let mut out = Vec::new();
             buck::write_buckfile(&config.buck, rules.iter(), &mut out)
