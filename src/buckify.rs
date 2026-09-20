@@ -1191,7 +1191,16 @@ fn generate_target_rules<'a>(
                     } else {
                         Name(tgt_disp.clone())
                     },
-                    visibility: if index.is_root_package(pkg) {
+                    visibility: if index.is_root_package(pkg)
+                        || (config.workspace_member_buck
+                            && index
+                                .workspace_members
+                                .iter()
+                                .any(|member| member.manifest_dir() == pkg.manifest_dir()))
+                    {
+                        // A member's library is first-party: other members name it by
+                        // label, so it is visible like any hand-written target rather
+                        // than private to the file it was generated into.
                         fixups.visibility(index)
                     } else if config.buck.split {
                         Visibility::Custom(vec![

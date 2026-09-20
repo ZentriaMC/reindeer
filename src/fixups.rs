@@ -183,6 +183,39 @@ impl<'meta> Fixups<'meta> {
         }
     }
 
+    /// The cell-relative directory `third_party_dir` sits in, i.e. the buck cell root.
+    ///
+    /// `buck_package` is what `native.package_name()` returns in the generated file, so
+    /// it is `third_party_dir` expressed relative to the cell; walking that many parents
+    /// back off `third_party_dir` gets to the cell root, which is what any other
+    /// package's label has to be measured from.
+    fn cell_root(&self) -> &'meta Path {
+        let mut root = self.third_party_dir;
+        for _ in 0..self.paths.buck_package.0.components().count() {
+            root = root.parent().unwrap_or(root);
+        }
+        root
+    }
+
+    /// Buck package the rules for a package are written into.
+    ///
+    /// Only an actual workspace member gets its own; everything else -- registry crates,
+    /// git checkouts, anything living outside the tree -- is in the generated third-party
+    /// file, wherever on disk its sources happen to be.
+    fn buck_package_of(&self, manifest_dir: &Path, index: &Index) -> String {
+        let is_member = index
+            .workspace_members
+            .iter()
+            .any(|member| member.manifest_dir() == manifest_dir);
+        if self.config.workspace_member_buck && is_member {
+            relative_path(self.cell_root(), manifest_dir)
+                .display()
+                .to_string()
+        } else {
+            self.paths.buck_package.0.display().to_string()
+        }
+    }
+
     fn configs(&self, platform_name: &PlatformName) -> Vec<&FixupConfig> {
         let mut configs = Vec::with_capacity(1 + self.fixup_config.platform_fixup.len());
 
@@ -272,7 +305,7 @@ impl<'meta> Fixups<'meta> {
             || matches!(self.package.source, Source::Local)
         {
             // Path to vendored file looks like "vendor/foo-1.0.0/src/lib.rs"
-            let manifest_dir = relative_path(self.third_party_dir, self.manifest_dir);
+            let manifest_dir = relative_path(self.output_dir(), self.manifest_dir);
             let path = manifest_dir.join(relative_to_manifest_dir);
             Ok(SubtargetOrPath::Path(BuckPath(path)))
         } else if let Source::Git { repo, .. } = &self.package.source {
@@ -295,6 +328,18 @@ impl<'meta> Fixups<'meta> {
     }
 
     pub fn visibility(&self, index: &Index) -> Visibility {
+        // A workspace member writing its own BUCK is first-party code: other members
+        // depend on it by label, so it has to be visible the way any hand-written target
+        // would be. The private-by-default treatment is for vendored crates.
+        if self.config.workspace_member_buck
+            && index
+                .workspace_members
+                .iter()
+                .any(|member| member.manifest_dir() == self.manifest_dir)
+        {
+            return Visibility::Public;
+        }
+
         let mut visibility = &Visibility::Public;
 
         for config in self.platform_independent_configs() {
@@ -1499,7 +1544,28 @@ impl<'meta> Fixups<'meta> {
                             )
                         }
                     } else {
-                        format!(":{}", collision_info.target_display(package),)
+                        // A relative label only resolves when both ends live in the same
+                        // generated file. Under workspace_member_buck they often do not:
+                        // a member's BUCK reaching a third-party crate, or a sibling
+                        // member, has to name that package.
+                        let home = self.buck_package_of(self.manifest_dir, index);
+                        let dep_home = self.buck_package_of(package.manifest_dir(), index);
+                        if home == dep_home {
+                            format!(":{}", collision_info.target_display(package))
+                        } else if !index
+                            .workspace_members
+                            .iter()
+                            .any(|member| member.manifest_dir() == package.manifest_dir())
+                            && index.is_public_package(package)
+                        {
+                            // Reaching into the third-party file, so go through the alias:
+                            // the versioned targets there are private to it, and the alias
+                            // is the surface reindeer publishes. A member has no alias --
+                            // its own BUCK holds the versioned target and nothing else.
+                            format!("//{}:{}", dep_home, index.public_rule_name(package))
+                        } else {
+                            format!("//{}:{}", dep_home, collision_info.target_display(package))
+                        }
                     }),
                     // Only use the rename if it isn't the same as the target anyway.
                     match package.dependency_target() {
@@ -1617,10 +1683,15 @@ impl<'meta> Fixups<'meta> {
                     if self.config.buck.split {
                         StringOrPath::String(".".to_owned())
                     } else {
-                        StringOrPath::Path(BuckPath(relative_path(
-                            self.third_party_dir,
-                            self.manifest_dir,
-                        )))
+                        // Relative to whichever file the rules land in. For a member
+                        // writing its own BUCK that is its own directory, and an empty
+                        // path is not one cargo accepts.
+                        let rel = relative_path(self.output_dir(), self.manifest_dir);
+                        if rel.as_os_str().is_empty() {
+                            StringOrPath::String(".".to_owned())
+                        } else {
+                            StringOrPath::Path(BuckPath(rel))
+                        }
                     }
                 } else if let VendorConfig::LocalRegistry = self.config.vendor {
                     StringOrPath::String(format!(
@@ -1766,7 +1837,7 @@ impl<'meta> Fixups<'meta> {
             }
 
             let mut insert = |absolute_path: &Path| {
-                let tp_rel_path = relative_path(self.third_party_dir, absolute_path);
+                let tp_rel_path = relative_path(self.output_dir(), absolute_path);
                 extra_srcs.insert(normalize_path(&tp_rel_path));
                 glob.mark_used();
             };
@@ -1840,7 +1911,7 @@ impl<'meta> Fixups<'meta> {
 
             if let Some(overlay) = &config.overlay {
                 let overlay_dir = self.fixup_config.fixup_dir.join(overlay);
-                let relative_overlay_dir = relative_path(self.third_party_dir, &overlay_dir);
+                let relative_overlay_dir = relative_path(self.output_dir(), &overlay_dir);
                 let overlay_files =
                     config.overlay_files(&self.fixup_config.fixup_dir, &self.config.buck);
 
