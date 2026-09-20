@@ -1132,8 +1132,18 @@ fn generate_target_rules<'a>(
         // root package library is exposed directly. In the case the root
         // package is public and the target is a staticlib we do expose it via
         // an alias.
-        if index.is_public_target(pkg, TargetReq::Lib) && !index.is_root_package(pkg)
-            || index.is_public_target(pkg, TargetReq::Staticlib)
+        // A member writing its own BUCK gets no alias in the third-party file. The alias
+        // exists to name a versioned target that is private to that file; a member's
+        // target is neither in it nor private, so the alias would point at something that
+        // is not there -- "Unknown target splits-ops-0.1 from package third-party/rust".
+        let member_owns_its_rules = config.workspace_member_buck
+            && index
+                .workspace_members
+                .iter()
+                .any(|member| member.manifest_dir() == pkg.manifest_dir());
+        if !member_owns_its_rules
+            && (index.is_public_target(pkg, TargetReq::Lib) && !index.is_root_package(pkg)
+                || index.is_public_target(pkg, TargetReq::Staticlib))
         {
             let platforms =
                 if !config.buck.alias_with_platforms.is_default && !tgt.crate_proc_macro() {
