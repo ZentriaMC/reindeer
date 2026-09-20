@@ -175,7 +175,13 @@ impl<'meta> Fixups<'meta> {
     /// outside `third_party_dir`, which is the same condition that would otherwise make
     /// its sources unreachable from the generated file.
     fn output_dir(&self) -> &'meta Path {
-        if self.config.workspace_member_buck && !self.manifest_dir.starts_with(self.third_party_dir)
+        // Source::Local narrows this to path and workspace crates. Without it every
+        // registry crate also looks like a member -- its manifest is off in the cargo
+        // home, which is not under third_party_dir either -- and its overlay and
+        // extra_srcs paths get rebased onto that, escaping the cell entirely.
+        if self.config.workspace_member_buck
+            && matches!(self.package.source, Source::Local)
+            && !self.manifest_dir.starts_with(self.third_party_dir)
         {
             self.manifest_dir
         } else {
