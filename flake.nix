@@ -19,7 +19,7 @@
         # pkgs.reindeer, and their flake.lock records the exact revision.
         packages.reindeer = pkgs.rustPlatform.buildRustPackage {
           pname = "reindeer";
-          version = "2026.09.19.00-zentria";
+          version = "2026.09.24.00-zentria";
 
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
