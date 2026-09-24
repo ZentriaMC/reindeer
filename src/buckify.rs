@@ -1406,6 +1406,19 @@ fn generate_target_rules<'a>(
                                 },
                             ),
                         ])
+                    } else if config.workspace_member_buck
+                        && index
+                            .workspace_members
+                            .iter()
+                            .any(|member| member.manifest_dir() == pkg.manifest_dir())
+                    {
+                        // A member's binary is first-party for the same reason its
+                        // library is: something outside the generated file names it.
+                        // Deployment is that something -- a package of aliases fixing
+                        // the installed name of each artifact, so that a crate version
+                        // bump renames a target in one place rather than silently
+                        // breaking whatever named the old one.
+                        fixups.visibility(index)
                     } else {
                         Visibility::Private
                     },
