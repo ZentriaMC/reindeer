@@ -19,15 +19,13 @@
         # pkgs.reindeer, and their flake.lock records the exact revision.
         packages.reindeer = pkgs.rustPlatform.buildRustPackage {
           pname = "reindeer";
-          version = "2026.09.24.00-zentria";
+          version = "2026.10.28.00-zentria";
 
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          # Same inputs nixpkgs builds it with: the -sys crates it pulls
-          # (curl, libgit2, libssh2, zlib) all vendor and build their own.
           nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
+          buildInputs = [ pkgs.openssl pkgs.curl ];
 
           # rlimit::tests::raise_does_not_lower_limit compares the file
           # descriptor limit before and after raising it, and fails wherever the
@@ -44,7 +42,7 @@
 
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
+          buildInputs = [ pkgs.openssl pkgs.curl ];
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ];
         };
       });

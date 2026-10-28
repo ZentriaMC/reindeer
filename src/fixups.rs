@@ -1062,9 +1062,10 @@ impl<'meta> Fixups<'meta> {
         if !base.cxx_library.is_empty() || !base.prebuilt_cxx_library.is_empty() {
             return true;
         }
-        self.fixup_config.platform_fixup.iter().any(|fixup| {
-            !fixup.cxx_library.is_empty() || !fixup.prebuilt_cxx_library.is_empty()
-        })
+        self.fixup_config
+            .platform_fixup
+            .iter()
+            .any(|fixup| !fixup.cxx_library.is_empty() || !fixup.prebuilt_cxx_library.is_empty())
     }
 
     /// Return buildscript-related rules
@@ -1276,8 +1277,11 @@ impl<'meta> Fixups<'meta> {
                     // Least specific first, so a crate's own `env` still wins: the repo-wide
                     // defaults, then what its `links` dependencies publish, then its own fixups.
                     let mut buildscript_run_env = self.config.buck.buildscript_env.clone();
-                    buildscript_run_env
-                        .extend(self.dep_links_env(index, platform_name, collision_info)?);
+                    buildscript_run_env.extend(self.dep_links_env(
+                        index,
+                        platform_name,
+                        collision_info,
+                    )?);
                     for fixup in self.configs(platform_name) {
                         if let Some(fixup_buildscript_run) = &fixup.buildscript.run {
                             buildscript_run_env.extend(

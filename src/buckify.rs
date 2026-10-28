@@ -1978,7 +1978,10 @@ pub(crate) fn buckify(
             let mut third_party = Vec::new();
             let mut per_member: BTreeMap<&Path, Vec<&Rule>> = BTreeMap::new();
             for rule in &rules {
-                match rule.owner().and_then(|owner| member_dir.get(owner.name.as_str())) {
+                match rule
+                    .owner()
+                    .and_then(|owner| member_dir.get(owner.name.as_str()))
+                {
                     Some(dir) => per_member.entry(dir).or_default().push(rule),
                     None => third_party.push(rule),
                 }
